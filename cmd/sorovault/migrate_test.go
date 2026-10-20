@@ -1,0 +1,202 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/soroworks/sorovault/internal/store"
+)
+
+// statusDeps returns dependencies for a database at the given version, with
+// the given migrations embedded.
+func statusDeps(version uint, dirty bool, migrations ...store.Migration) migrateStatusDeps {
+	return migrateStatusDeps{
+		Version: func(context.Context) (uint, bool, error) {
+			return version, dirty, nil
+		},
+		Migrations: func(context.Context) ([]store.Migration, error) {
+			return migrations, nil
+		},
+	}
+}
+
+// runMigrateStatusCmd runs the status command against the given dependencies
+// and returns what it printed and the error it ended with.
+func runMigrateStatusCmd(t *testing.T, deps migrateStatusDeps, args ...string) (string, error) {
+	t.Helper()
+
+	cmd := newMigrateStatusCmd(func() (migrateStatusDeps, error) { return deps, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// TestMigrateStatusReportsVersionsAndPendingMigrations proves the command
+// says where the database is, where the binary is, and what is left to do.
+func TestMigrateStatusReportsVersionsAndPendingMigrations(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(2, false,
+		store.Migration{Version: 1, Name: "init"},
+		store.Migration{Version: 2, Name: "spec_symbols"},
+		store.Migration{Version: 3, Name: "wasm_specs"},
+	)
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.Error(t, err, "pending migrations must end with a non-zero status")
+
+	assert.Contains(t, out, "current version: 2")
+	assert.Contains(t, out, "latest version:  3")
+	assert.Contains(t, out, "wasm_specs", "a pending migration must be named")
+	assert.NotContains(t, out, "spec_symbols", "an applied migration is not pending")
+}
+
+// TestMigrateStatusSucceedsWhenUpToDate proves a database with nothing
+// pending exits zero.
+func TestMigrateStatusSucceedsWhenUpToDate(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(3, false,
+		store.Migration{Version: 1, Name: "init"},
+		store.Migration{Version: 3, Name: "wasm_specs"},
+	)
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.NoError(t, err, "an up-to-date database must exit zero")
+
+	assert.Contains(t, out, "the database is up to date")
+	assert.NotContains(t, out, "pending migrations")
+}
+
+// TestMigrateStatusReportsDirtyState proves a dirty database is reported
+// with what to do about it, and ends with a non-zero status.
+func TestMigrateStatusReportsDirtyState(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(2, true, store.Migration{Version: 1, Name: "init"})
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.Error(t, err, "a dirty database must exit non-zero")
+
+	assert.Contains(t, out, "dirty")
+	assert.Contains(t, out, "migrate force", "the report must say what to do about it")
+}
+
+// TestMigrateStatusReportsADatabaseAheadOfTheBinary proves a database
+// migrated by a newer binary is reported rather than called up to date.
+func TestMigrateStatusReportsADatabaseAheadOfTheBinary(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(5, false, store.Migration{Version: 4, Name: "contract_source"})
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.NoError(t, err, "there is nothing to apply")
+
+	assert.Contains(t, out, "current version: 5")
+	assert.Contains(t, out, "ahead of the migrations in this binary")
+}
+
+// TestMigrateStatusRejectsArguments proves the command takes none.
+func TestMigrateStatusRejectsArguments(t *testing.T) {
+	t.Parallel()
+
+	_, err := runMigrateStatusCmd(t, statusDeps(1, false), "extra")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown command")
+}
+
+// TestMigrateStatusIsACommand proves `sorovault migrate status` is wired up,
+// and that `sorovault migrate` still applies migrations.
+func TestMigrateStatusIsACommand(t *testing.T) {
+	t.Parallel()
+
+	var migrate *cobra.Command
+	for _, cmd := range newRootCmd().Commands() {
+		if cmd.Name() == "migrate" {
+			migrate = cmd
+		}
+	}
+	require.NotNil(t, migrate, "sorovault migrate must exist")
+	assert.True(t, migrate.Runnable(), "sorovault migrate must still apply migrations")
+
+	var status *cobra.Command
+	for _, cmd := range migrate.Commands() {
+		if cmd.Name() == "status" {
+			status = cmd
+		}
+	}
+	require.NotNil(t, status, "sorovault migrate status must exist")
+}
+
+// TestMigrateStatusDoesNotApplyMigrations proves a status run applies
+// nothing: the schema it is pointed at has no migration applied afterwards.
+//
+// golang-migrate creates the version table when it opens the database, so
+// what is checked here is that no migration ran, not that the schema is
+// untouched.
+func TestMigrateStatusDoesNotApplyMigrations(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	schema := "migrate_status"
+	createSchema(t, url, schema)
+	t.Cleanup(func() { dropSchema(t, url, schema) })
+
+	// A connection string that looks at the empty schema and nowhere else.
+	scoped := url + "&options=-c%20search_path%3D" + schema
+
+	deps := migrateStatusDeps{
+		Version: func(context.Context) (uint, bool, error) {
+			return store.MigrationVersion(scoped)
+		},
+		Migrations: func(context.Context) ([]store.Migration, error) {
+			return store.EmbeddedMigrations()
+		},
+	}
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.Error(t, err, "a database with no migrations applied has pending migrations")
+	assert.Contains(t, out, "current version: 0")
+
+	counts := tableCounts(t, scoped)
+	assert.NotContains(t, counts, "contracts", "a status run must not apply migrations")
+}
+
+// TestMigrateAppliesMigrations proves the migrate command still applies
+// migrations now that it has a status subcommand.
+func TestMigrateAppliesMigrations(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+
+	schema := "migrate_apply"
+	createSchema(t, url, schema)
+	t.Cleanup(func() { dropSchema(t, url, schema) })
+
+	scoped := url + "&options=-c%20search_path%3D" + schema
+	t.Setenv("DATABASE_URL", scoped)
+	t.Setenv("DATABASE_URL_FILE", "")
+
+	cmd := newMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), "database is at migration version")
+
+	counts := tableCounts(t, scoped)
+	assert.Contains(t, counts, "contracts", "the migrations should have been applied")
+}

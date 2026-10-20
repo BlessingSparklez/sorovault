@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -124,31 +126,59 @@ func MigrationStatus(ctx context.Context, databaseURL string) (current, latest u
 // LatestMigrationVersion reports the highest version among the embedded
 // migrations.
 //
-// The versions are read through golang-migrate's own source, so the naming
+// The versions are read through golang-migrate's own parser, so the naming
 // convention stays in one place.
 func LatestMigrationVersion() (uint, error) {
-	src, err := iofs.New(sorovault.Migrations, "migrations")
+	migrations, err := EmbeddedMigrations()
 	if err != nil {
-		return 0, fmt.Errorf("store: reading embedded migrations: %w", err)
+		return 0, err
+	}
+	if len(migrations) == 0 {
+		return 0, errors.New("store: no embedded migrations")
+	}
+	return migrations[len(migrations)-1].Version, nil
+}
+
+// Migration is one migration in the embedded set.
+type Migration struct {
+	// Version is the migration's version number.
+	Version uint
+	// Name is the migration's name, without the version prefix or the
+	// .up.sql suffix.
+	Name string
+}
+
+// EmbeddedMigrations lists the migrations embedded in the binary, oldest
+// first.
+//
+// The names are parsed with golang-migrate's own parser, so the file naming
+// convention stays in one place.
+func EmbeddedMigrations() ([]Migration, error) {
+	entries, err := fs.ReadDir(sorovault.Migrations, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("store: reading embedded migrations: %w", err)
 	}
 
-	version, err := src.First()
-	if err != nil {
-		return 0, fmt.Errorf("store: reading embedded migrations: %w", err)
-	}
-	for {
-		next, err := src.Next(version)
+	var migrations []Migration
+	for _, entry := range entries {
+		parsed, err := source.DefaultParse(entry.Name())
 		if err != nil {
-			// The source reports the end of the migrations as a missing
-			// path.
-			if errors.Is(err, fs.ErrNotExist) {
-				break
-			}
-			return 0, fmt.Errorf("store: reading embedded migrations: %w", err)
+			// Not a migration file; the directory may hold anything.
+			continue
 		}
-		version = next
+		if parsed.Direction != source.Up {
+			continue
+		}
+		migrations = append(migrations, Migration{
+			Version: parsed.Version,
+			Name:    parsed.Identifier,
+		})
 	}
-	return version, nil
+
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].Version < migrations[j].Version
+	})
+	return migrations, nil
 }
 
 // closeMigrator releases a migrator's source and database handles. Errors

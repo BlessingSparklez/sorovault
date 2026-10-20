@@ -256,6 +256,26 @@ func TestContractPage(t *testing.T) {
 	assert.Contains(t, body, "/api/contracts/"+idA+"/client.ts?", "the typed client should be linked")
 }
 
+// TestContractPageOffersTheABIDownload proves the page links to the
+// interface as a file, and not only to the document the browser renders.
+func TestContractPageOffersTheABIDownload(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.register(t, idA)
+
+	const hash = "c618dae264864ccf446a3c7db27da80c7c83e840131242cc2fe9cd32a2a20781"
+
+	resp, body := h.get(t, "/contracts/"+idA)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	assert.Contains(t, body,
+		`href="/api/contracts/`+idA+`?network=testnet&amp;wasm_hash=`+hash+`&amp;download=1"`,
+		"the page should link to the interface as a download")
+	assert.Contains(t, body, idA+".c618dae26486.abi.json",
+		"the link should say what the downloaded file will be called")
+}
+
 // TestContractPageEscapesOutput guards against a contract's own strings
 // being rendered as markup. Doc comments come from an untrusted chain.
 func TestContractPageEscapesOutput(t *testing.T) {

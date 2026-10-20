@@ -317,6 +317,15 @@ func funcs() template.FuncMap {
 			}
 			return s[:n] + "…"
 		},
+		// truncate shortens a string without the ellipsis, for the places
+		// that show a name rather than a summary of one — a file name, for
+		// instance, which has to be the name the file will actually have.
+		"truncate": func(s string, n int) string {
+			if len(s) <= n {
+				return s
+			}
+			return s[:n]
+		},
 		"hasTypes": func(t model.Types) bool {
 			return len(t.Structs)+len(t.Unions)+len(t.Enums)+len(t.ErrorEnums) > 0
 		},

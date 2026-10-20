@@ -71,7 +71,8 @@
         "parameters": [
           { "$ref": "#/components/parameters/id" },
           { "$ref": "#/components/parameters/network" },
-          { "$ref": "#/components/parameters/wasmHash" }
+          { "$ref": "#/components/parameters/wasmHash" },
+          { "name": "download", "in": "query", "description": "Any value sets Content-Disposition: attachment, so the interface is saved as <contract>.<short-hash>.abi.json.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": { "description": "The interface.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContractInterface" }, "examples": { "zkvote": { "$ref": "#/components/examples/ContractInterface" } } } } },

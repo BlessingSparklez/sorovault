@@ -218,7 +218,7 @@ stale.
 | `POST` | `/api/contracts` | register a contract — `{"contract_id": "C…"}` |
 | `POST` | `/api/wasm/{hash}` | catalog uploaded code before a contract runs it |
 | `GET` | `/api/wasm/{hash}` | read a catalogued uploaded-code interface — `?network=` |
-| `GET` | `/api/contracts/{id}` | the decoded ABI — `?network=`, `?wasm_hash=` |
+| `GET` | `/api/contracts/{id}` | the decoded ABI — `?network=`, `?wasm_hash=`, `?download=1` |
 | `PUT` | `/api/contracts/{id}/source` | attach a `source_url` and optional `source_commit` |
 | `GET` | `/api/contracts/{id}/functions/{fn}` | one function in detail |
 | `GET` | `/api/contracts/{id}/client.ts` | typed TypeScript client — `?wasm_hash=`, `?download=1` |
@@ -247,6 +247,10 @@ Status codes worth knowing: **422** means the contract exists but has no
 interface to serve (a Stellar asset contract, or a module with no spec section),
 as distinct from **404**, which means it is not there at all.
 
+`?download=1` serves a contract's interface as a file rather than a document
+the browser renders — `<contract>.<short-hash>.abi.json` — which is what the
+browse page's download link uses.
+
 ## CLI
 
 ```console
@@ -257,6 +261,7 @@ sorovault get <contract_id>         # --function, --wasm-hash, --json
 sorovault codegen <contract_id>     # --lang ts|md; -o, --wasm-hash
 sorovault serve                     # JSON API + browse UI
 sorovault migrate                   # apply schema migrations
+sorovault migrate status            # show applied and pending migrations
 sorovault doctor                    # check a deployment's health
 ```
 
@@ -311,6 +316,33 @@ never writes to the database, applies a migration, or changes anything on
 the network. It reads the same configuration as everything else, so a
 deployment missing its `DATABASE_URL` is reported as a configuration error
 rather than a passing check.
+
+### `sorovault migrate status`
+
+Before an upgrade, an operator wants to know what is applied and what is
+pending — without applying anything. `migrate status` says exactly that, and
+nothing more:
+
+```console
+$ sorovault migrate status
+current version: 2
+latest version:  4
+
+pending migrations:
+  VERSION  NAME
+  3        wasm_specs
+  4        contract_source
+```
+
+The versions come from golang-migrate, the same source `sorovault migrate`
+applies, so the two cannot disagree; the pending migrations are the ones
+embedded in the binary that the database has not reached. No migration is
+applied: a status run reports and stops there.
+
+The command exits non-zero when migrations are pending, so it can gate a
+deployment. A database marked **dirty** — a migration that failed partway, so
+the schema is in an unknown state — is reported as such, with what to do
+about it, and also exits non-zero.
 
 ## Typed clients
 
