@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -89,7 +90,8 @@ func TestMigrateStatusReportsDirtyState(t *testing.T) {
 	require.Error(t, err, "a dirty database must exit non-zero")
 
 	assert.Contains(t, out, "dirty")
-	assert.Contains(t, out, "migrate force", "the report must say what to do about it")
+	assert.Contains(t, out, "force <version>", "the report must say what to do about it")
+	assert.Contains(t, out, "-database", "the report must say how to point the tool at the database")
 }
 
 // TestMigrateStatusReportsADatabaseAheadOfTheBinary proves a database
@@ -104,6 +106,71 @@ func TestMigrateStatusReportsADatabaseAheadOfTheBinary(t *testing.T) {
 
 	assert.Contains(t, out, "current version: 5")
 	assert.Contains(t, out, "ahead of the migrations in this binary")
+}
+
+// TestMigrateStatusPrefersTheDirtyState proves a dirty database is reported
+// as dirty even when migrations are pending as well: the schema is in an
+// unknown state, so the pending list cannot be trusted either.
+func TestMigrateStatusPrefersTheDirtyState(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(1, true,
+		store.Migration{Version: 1, Name: "init"},
+		store.Migration{Version: 2, Name: "spec_symbols"},
+	)
+
+	out, err := runMigrateStatusCmd(t, deps)
+	require.Error(t, err, "a dirty database must exit non-zero")
+
+	assert.Contains(t, out, "dirty")
+	assert.NotContains(t, out, "pending migrations:",
+		"a dirty database's pending list cannot be trusted")
+}
+
+// TestMigrateStatusFailsWithoutEmbeddedMigrations proves a binary that
+// cannot know what "up to date" means says so, rather than certifying a
+// database it knows nothing about.
+func TestMigrateStatusFailsWithoutEmbeddedMigrations(t *testing.T) {
+	t.Parallel()
+
+	_, err := runMigrateStatusCmd(t, statusDeps(0, false))
+	require.Error(t, err, "a binary with no migrations cannot certify a database")
+	assert.Contains(t, err.Error(), "no migrations")
+}
+
+// TestMigrateStatusEmitsJSON proves the report can be read by a deployment
+// gate rather than a person.
+func TestMigrateStatusEmitsJSON(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(2, false,
+		store.Migration{Version: 1, Name: "init"},
+		store.Migration{Version: 3, Name: "wasm_specs"},
+	)
+
+	out, err := runMigrateStatusCmd(t, deps, "--json")
+	require.Error(t, err, "pending migrations must end with a non-zero status")
+
+	// The shape is spelled out here rather than reusing the command's own
+	// type, so a renamed field is a failure rather than a silent change
+	// of the wire format.
+	var report struct {
+		Current uint `json:"current_version"`
+		Latest  uint `json:"latest_version"`
+		Dirty   bool `json:"dirty"`
+		Pending []struct {
+			Version uint   `json:"version"`
+			Name    string `json:"name"`
+		} `json:"pending"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &report), "the report must be JSON: %s", out)
+
+	assert.Equal(t, uint(2), report.Current)
+	assert.Equal(t, uint(3), report.Latest)
+	assert.False(t, report.Dirty)
+	require.Len(t, report.Pending, 1, "only the migration the database has not reached is pending")
+	assert.Equal(t, uint(3), report.Pending[0].Version)
+	assert.Equal(t, "wasm_specs", report.Pending[0].Name)
 }
 
 // TestMigrateStatusRejectsArguments proves the command takes none.
@@ -171,7 +238,9 @@ func TestMigrateStatusDoesNotApplyMigrations(t *testing.T) {
 	assert.Contains(t, out, "current version: 0")
 
 	counts := tableCounts(t, scoped)
-	assert.NotContains(t, counts, "contracts", "a status run must not apply migrations")
+	for _, table := range []string{"contracts", "specs", "wasm_specs"} {
+		assert.NotContains(t, counts, table, "a status run must not apply migrations")
+	}
 }
 
 // TestMigrateAppliesMigrations proves the migrate command still applies

@@ -261,7 +261,7 @@ sorovault get <contract_id>         # --function, --wasm-hash, --json
 sorovault codegen <contract_id>     # --lang ts|md; -o, --wasm-hash
 sorovault serve                     # JSON API + browse UI
 sorovault migrate                   # apply schema migrations
-sorovault migrate status            # show applied and pending migrations
+sorovault migrate status            # --json
 sorovault doctor                    # check a deployment's health
 ```
 
@@ -337,12 +337,30 @@ pending migrations:
 The versions come from golang-migrate, the same source `sorovault migrate`
 applies, so the two cannot disagree; the pending migrations are the ones
 embedded in the binary that the database has not reached. No migration is
-applied: a status run reports and stops there.
+applied: a status run reports and stops there. It does read the database
+through golang-migrate, which creates the migrator's own version table if the
+database has not been migrated yet — nothing else is written.
 
 The command exits non-zero when migrations are pending, so it can gate a
 deployment. A database marked **dirty** — a migration that failed partway, so
 the schema is in an unknown state — is reported as such, with what to do
 about it, and also exits non-zero.
+
+`--json` emits the same report as JSON, for a gate that reads it rather than
+a person:
+
+```console
+$ sorovault migrate status --json
+{
+  "current_version": 2,
+  "latest_version": 4,
+  "dirty": false,
+  "pending": [
+    { "version": 3, "name": "wasm_specs" },
+    { "version": 4, "name": "contract_source" }
+  ]
+}
+```
 
 ## Typed clients
 

@@ -376,8 +376,8 @@ func migrateStatusDepsFromEnv() (migrateStatusDeps, error) {
 	return migrateStatusDeps{
 		// golang-migrate is the same source of truth the migrate command
 		// applies, so the two cannot disagree about where the database is.
-		// It creates the version table if the database has none, which is
-		// the one thing a status run may write.
+		// Opening a database through it creates the version table if the
+		// database has none, which is the one thing a status run may write.
 		Version: func(context.Context) (uint, bool, error) {
 			return store.MigrationVersion(databaseURL)
 		},
@@ -387,9 +387,33 @@ func migrateStatusDepsFromEnv() (migrateStatusDeps, error) {
 	}, nil
 }
 
+// migrateStatusReport is what a status run found, in the form the --json
+// flag emits.
+type migrateStatusReport struct {
+	// Current is the migration version the database has applied.
+	Current uint `json:"current_version"`
+	// Latest is the highest migration version embedded in this binary.
+	Latest uint `json:"latest_version"`
+	// Dirty says whether the database is marked dirty.
+	Dirty bool `json:"dirty"`
+	// Pending lists the migrations the database has not applied, oldest
+	// first. It is empty rather than null when there are none.
+	Pending []migrationStatusItem `json:"pending"`
+}
+
+// migrationStatusItem is one migration in a status report.
+type migrationStatusItem struct {
+	// Version is the migration's version number.
+	Version uint `json:"version"`
+	// Name is the migration's name.
+	Name string `json:"name"`
+}
+
 // newMigrateStatusCmd builds the "migrate status" command. Its dependencies
 // are injected so it can be exercised without a database.
 func newMigrateStatusCmd(depsFor func() (migrateStatusDeps, error)) *cobra.Command {
+	var asJSON bool
+
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show which migrations are applied and which are pending",
@@ -403,7 +427,8 @@ The command exits non-zero when migrations are pending, so it can gate a
 deployment.`,
 		Args: cobra.NoArgs,
 		// The report already says what is wrong, so the error only carries
-		// the summary and cobra need not print it as well.
+		// the summary, and main prints that rather than cobra printing it
+		// a second time.
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -411,15 +436,17 @@ deployment.`,
 			if err != nil {
 				return err
 			}
-			return reportMigrationStatus(cmd.Context(), cmd.OutOrStdout(), deps)
+			return reportMigrationStatus(cmd.Context(), cmd.OutOrStdout(), deps, asJSON)
 		},
 	}
+
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 	return cmd
 }
 
-// reportMigrationStatus writes what a status run found, and fails when the
-// database is not in a state a deployment can start from.
-func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusDeps) error {
+// reportMigrationStatus works out where the database is, writes the report,
+// and fails when the database is not in a state a deployment can start from.
+func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusDeps, asJSON bool) error {
 	current, dirty, err := deps.Version(ctx)
 	if err != nil {
 		return err
@@ -429,47 +456,76 @@ func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusD
 	if err != nil {
 		return err
 	}
+	if len(migrations) == 0 {
+		// A binary that embeds no migrations cannot say whether a database
+		// is up to date, and saying "up to date" would be a lie.
+		return errors.New("this binary embeds no migrations")
+	}
 
-	var (
-		latest  uint
-		pending []store.Migration
-	)
+	report := migrateStatusReport{
+		Current: current,
+		Dirty:   dirty,
+		Pending: []migrationStatusItem{},
+	}
 	for _, m := range migrations {
-		if m.Version > latest {
-			latest = m.Version
+		if m.Version > report.Latest {
+			report.Latest = m.Version
 		}
 		if m.Version > current {
-			pending = append(pending, m)
+			report.Pending = append(report.Pending, migrationStatusItem{
+				Version: m.Version,
+				Name:    m.Name,
+			})
 		}
 	}
 
-	fmt.Fprintf(w, "current version: %d\n", current)
-	fmt.Fprintf(w, "latest version:  %d\n", latest)
+	if asJSON {
+		if err := writeJSON(w, report); err != nil {
+			return err
+		}
+	} else if err := writeMigrationStatus(w, report); err != nil {
+		return err
+	}
 
 	switch {
-	case dirty:
+	case report.Dirty:
 		// A dirty database is the more urgent problem: the schema is in
 		// an unknown state, so the pending list cannot be trusted either.
-		fmt.Fprintf(w, "\nthe database is marked dirty: a migration failed partway and the schema is in an unknown state\n")
-		fmt.Fprintf(w, "repair the schema by hand, then set the version with the golang-migrate CLI (`migrate force <version>`) before applying migrations again\n")
 		return errors.New("the database is marked dirty and needs manual repair")
 
-	case len(pending) > 0:
+	case len(report.Pending) > 0:
+		return fmt.Errorf("%d migration(s) pending; run `sorovault migrate` to apply them", len(report.Pending))
+
+	default:
+		// Nothing is pending, whether the database is at the latest version
+		// or ahead of it; the report says which of the two it is.
+		return nil
+	}
+}
+
+// writeMigrationStatus writes the human-readable report.
+func writeMigrationStatus(w io.Writer, report migrateStatusReport) error {
+	fmt.Fprintf(w, "current version: %d\n", report.Current)
+	fmt.Fprintf(w, "latest version:  %d\n", report.Latest)
+
+	switch {
+	case report.Dirty:
+		fmt.Fprintf(w, "\nthe database is marked dirty: a migration failed partway and the schema is in an unknown state\n")
+		fmt.Fprintf(w, "repair the schema by hand, then set the version with the golang-migrate CLI (`migrate -path migrations -database \"$DATABASE_URL\" force <version>`) before applying migrations again\n")
+		return nil
+
+	case len(report.Pending) > 0:
 		fmt.Fprintf(w, "\npending migrations:\n")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "  VERSION\tNAME")
-		for _, m := range pending {
+		for _, m := range report.Pending {
 			fmt.Fprintf(tw, "  %d\t%s\n", m.Version, m.Name)
 		}
-		if err := tw.Flush(); err != nil {
-			return err
-		}
-		return fmt.Errorf("%d migration(s) pending; run `sorovault migrate` to apply them", len(pending))
+		return tw.Flush()
 
-	case current > latest:
-		// A database migrated by a newer binary than this one: there is
-		// nothing to apply, but the two do not agree.
-		fmt.Fprintf(w, "\nthe database is at version %d, ahead of the migrations in this binary (version %d)\n", current, latest)
+	case report.Current > report.Latest:
+		fmt.Fprintf(w, "\nthe database is at version %d, ahead of the migrations in this binary (version %d)\n",
+			report.Current, report.Latest)
 		return nil
 
 	default:
