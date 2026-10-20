@@ -597,8 +597,13 @@ func TestDownloadContractABI(t *testing.T) {
 		assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
 
 		hash := h.decode(t, raw)["wasm_hash"].(string)
-		assert.Equal(t, `attachment; filename="`+api.ABIFilename(idA, hash)+`"`,
-			resp.Header.Get("Content-Disposition"))
+		// The name is spelled out rather than built from the helper the
+		// handler uses: the .abi.json suffix is part of what the file is
+		// promised to be, and a test that reuses the implementation cannot
+		// notice it changing.
+		assert.Equal(t, idA+"."+hash[:12]+".abi.json",
+			attachmentName(t, resp.Header.Get("Content-Disposition")),
+			"the file must be named after the contract and the version it was decoded from")
 	})
 
 	t.Run("a superseded version is saved under its own hash", func(t *testing.T) {
@@ -609,8 +614,9 @@ func TestDownloadContractABI(t *testing.T) {
 		oldHash := stellartest.HashOf(old)
 		resp, _ = h.do(t, http.MethodGet, "/api/contracts/"+idA+"?wasm_hash="+oldHash+"&download=1", "")
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, `attachment; filename="`+api.ABIFilename(idA, oldHash)+`"`,
-			resp.Header.Get("Content-Disposition"))
+		assert.Equal(t, idA+"."+oldHash[:12]+".abi.json",
+			attachmentName(t, resp.Header.Get("Content-Disposition")),
+			"two versions of one contract must not be saved under the same name")
 	})
 
 	t.Run("a contract that is not there is not offered as a file", func(t *testing.T) {
@@ -619,6 +625,19 @@ func TestDownloadContractABI(t *testing.T) {
 		assert.Empty(t, resp.Header.Get("Content-Disposition"),
 			"a failed request must not name a file to save")
 	})
+}
+
+// attachmentName pulls the file name out of a Content-Disposition header.
+func attachmentName(t *testing.T, header string) string {
+	t.Helper()
+
+	const prefix = `attachment; filename="`
+	require.True(t, strings.HasPrefix(header, prefix),
+		"the response must offer the document as a file, got %q", header)
+
+	name := strings.TrimSuffix(strings.TrimPrefix(header, prefix), `"`)
+	require.NotEmpty(t, name, "a download must be given a name")
+	return name
 }
 
 func TestTypeScriptClient(t *testing.T) {

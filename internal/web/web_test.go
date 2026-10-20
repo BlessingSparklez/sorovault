@@ -273,7 +273,14 @@ func TestContractPageOffersTheABIDownload(t *testing.T) {
 	assert.Contains(t, body,
 		`href="/api/contracts/`+idA+`?network=testnet&amp;wasm_hash=`+hash+`&amp;download=1"`,
 		"the page should link to the interface as a download")
-	assert.Contains(t, body, api.ABIFilename(idA, hash),
+
+	// The name is spelled out here rather than built from the API's own
+	// helper: the .abi.json suffix is what the file is promised to be, and
+	// a test that reuses the implementation cannot notice it changing.
+	const want = idA + ".c618dae26486.abi.json"
+	assert.Equal(t, want, api.ABIFilename(idA, hash),
+		"a downloaded interface must be named <contract>.<short-hash>.abi.json")
+	assert.Contains(t, body, want,
 		"the link should say what the downloaded file will be called")
 }
 
