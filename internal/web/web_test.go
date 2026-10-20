@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/soroworks/sorovault/internal/api"
 	"github.com/soroworks/sorovault/internal/model"
 	"github.com/soroworks/sorovault/internal/registry"
 	"github.com/soroworks/sorovault/internal/spec"
@@ -272,7 +273,7 @@ func TestContractPageOffersTheABIDownload(t *testing.T) {
 	assert.Contains(t, body,
 		`href="/api/contracts/`+idA+`?network=testnet&amp;wasm_hash=`+hash+`&amp;download=1"`,
 		"the page should link to the interface as a download")
-	assert.Contains(t, body, idA+".c618dae26486.abi.json",
+	assert.Contains(t, body, api.ABIFilename(idA, hash),
 		"the link should say what the downloaded file will be called")
 }
 

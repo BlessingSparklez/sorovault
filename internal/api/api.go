@@ -268,7 +268,7 @@ func (s *Server) getContract(w http.ResponseWriter, r *http.Request) {
 
 	// The header has to be set before the body is written.
 	if r.URL.Query().Get("download") != "" {
-		w.Header().Set("Content-Disposition", `attachment; filename="`+abiFilename(contractID, cacheHash)+`"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+ABIFilename(contractID, cacheHash)+`"`)
 	}
 
 	writeJSON(w, http.StatusOK, contractResponse{
@@ -283,10 +283,13 @@ func (s *Server) getContract(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// abiFilename names the file a downloaded interface is saved as: the contract
+// ABIFilename names the file a downloaded interface is saved as: the contract
 // it belongs to, and the short form of the WASM hash it was decoded from, so
 // two versions of one contract do not collide.
-func abiFilename(contractID, wasmHash string) string {
+//
+// The browse page names the file the same way, so the two cannot disagree
+// about what a download will be called.
+func ABIFilename(contractID, wasmHash string) string {
 	return contractID + "." + shortHash(wasmHash) + ".abi.json"
 }
 

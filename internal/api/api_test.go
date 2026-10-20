@@ -597,7 +597,7 @@ func TestDownloadContractABI(t *testing.T) {
 		assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
 
 		hash := h.decode(t, raw)["wasm_hash"].(string)
-		assert.Equal(t, `attachment; filename="`+idA+`.`+hash[:12]+`.abi.json"`,
+		assert.Equal(t, `attachment; filename="`+api.ABIFilename(idA, hash)+`"`,
 			resp.Header.Get("Content-Disposition"))
 	})
 
@@ -609,8 +609,15 @@ func TestDownloadContractABI(t *testing.T) {
 		oldHash := stellartest.HashOf(old)
 		resp, _ = h.do(t, http.MethodGet, "/api/contracts/"+idA+"?wasm_hash="+oldHash+"&download=1", "")
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, `attachment; filename="`+idA+`.`+oldHash[:12]+`.abi.json"`,
+		assert.Equal(t, `attachment; filename="`+api.ABIFilename(idA, oldHash)+`"`,
 			resp.Header.Get("Content-Disposition"))
+	})
+
+	t.Run("a contract that is not there is not offered as a file", func(t *testing.T) {
+		resp, _ := h.do(t, http.MethodGet, "/api/contracts/"+idB+"?download=1", "")
+		require.Equal(t, http.StatusNotFound, resp.StatusCode)
+		assert.Empty(t, resp.Header.Get("Content-Disposition"),
+			"a failed request must not name a file to save")
 	})
 }
 

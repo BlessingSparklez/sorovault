@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/soroworks/sorovault/internal/api"
 	"github.com/soroworks/sorovault/internal/model"
 	"github.com/soroworks/sorovault/internal/registry"
 	"github.com/soroworks/sorovault/internal/store"
@@ -317,15 +318,10 @@ func funcs() template.FuncMap {
 			}
 			return s[:n] + "…"
 		},
-		// truncate shortens a string without the ellipsis, for the places
-		// that show a name rather than a summary of one — a file name, for
-		// instance, which has to be the name the file will actually have.
-		"truncate": func(s string, n int) string {
-			if len(s) <= n {
-				return s
-			}
-			return s[:n]
-		},
+		// abiFilename is the API's own rule for naming a downloaded
+		// interface, so the page cannot promise a file name the response
+		// header does not use.
+		"abiFilename": api.ABIFilename,
 		"hasTypes": func(t model.Types) bool {
 			return len(t.Structs)+len(t.Unions)+len(t.Enums)+len(t.ErrorEnums) > 0
 		},
