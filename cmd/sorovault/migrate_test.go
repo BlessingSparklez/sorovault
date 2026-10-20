@@ -162,6 +162,7 @@ func TestMigrateStatusEmitsJSON(t *testing.T) {
 			Version uint   `json:"version"`
 			Name    string `json:"name"`
 		} `json:"pending"`
+		Message string `json:"message"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &report), "the report must be JSON: %s", out)
 
@@ -171,6 +172,38 @@ func TestMigrateStatusEmitsJSON(t *testing.T) {
 	require.Len(t, report.Pending, 1, "only the migration the database has not reached is pending")
 	assert.Equal(t, uint(3), report.Pending[0].Version)
 	assert.Equal(t, "wasm_specs", report.Pending[0].Name)
+	assert.Contains(t, report.Message, "sorovault migrate",
+		"the report must say what to do about pending migrations")
+}
+
+// TestMigrateStatusJSONExplainsADirtyDatabase proves the JSON report says
+// what to do about a dirty database, and not only that it is dirty.
+//
+// The text report has said so since the command was written; a reader of
+// the JSON deserves the same.
+func TestMigrateStatusJSONExplainsADirtyDatabase(t *testing.T) {
+	t.Parallel()
+
+	deps := statusDeps(2, true,
+		store.Migration{Version: 1, Name: "init"},
+		store.Migration{Version: 3, Name: "wasm_specs"},
+	)
+
+	out, err := runMigrateStatusCmd(t, deps, "--json")
+	require.Error(t, err, "a dirty database must exit non-zero")
+
+	var report struct {
+		Dirty   bool   `json:"dirty"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &report), "the report must be JSON: %s", out)
+
+	assert.True(t, report.Dirty, "the report must say the database is dirty")
+	assert.Contains(t, report.Message, "dirty", "the report must say what is wrong")
+	assert.Contains(t, report.Message, "force <version>",
+		"the report must say what to do about it")
+	assert.Contains(t, out, "force <version>",
+		"the advice must be readable in the JSON, not escaped into \\u003cversion\\u003e")
 }
 
 // TestMigrateStatusRejectsArguments proves the command takes none.

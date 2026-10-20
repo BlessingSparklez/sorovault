@@ -399,6 +399,44 @@ type migrateStatusReport struct {
 	// Pending lists the migrations the database has not applied, oldest
 	// first. It is empty rather than null when there are none.
 	Pending []migrationStatusItem `json:"pending"`
+	// Message says what the report means and what to do about it, so a
+	// reader of the JSON is told what a reader of the text report is.
+	Message string `json:"message"`
+}
+
+// The wording of the report. The text form and the JSON form both come
+// from here, so they cannot describe the same state differently.
+const (
+	// dirtyState says what a dirty database means.
+	dirtyState = "the database is marked dirty: a migration failed partway and the schema is in an unknown state"
+	// dirtyAdvice says what to do about a dirty database.
+	dirtyAdvice = "the pending migrations cannot be applied until the schema is repaired: " +
+		"fix the schema by hand, then set the version with the golang-migrate CLI " +
+		"(`migrate -path migrations -database \"$DATABASE_URL\" force <version>`) before applying migrations again"
+	// upToDate says the database has every migration this binary carries.
+	upToDate = "the database is up to date"
+)
+
+// statusMessage summarises the report in one line: what state the database
+// is in, and what to do about it.
+//
+// The text report says the same in more than one line where a terminal
+// reads better.
+func statusMessage(report migrateStatusReport) string {
+	switch {
+	case report.Dirty:
+		return dirtyState + "; " + dirtyAdvice
+
+	case len(report.Pending) > 0:
+		return fmt.Sprintf("%d migration(s) pending; run `sorovault migrate` to apply them", len(report.Pending))
+
+	case report.Current > report.Latest:
+		return fmt.Sprintf("the database is at version %d, ahead of the migrations in this binary (version %d)",
+			report.Current, report.Latest)
+
+	default:
+		return upToDate
+	}
 }
 
 // migrationStatusItem is one migration in a status report.
@@ -478,6 +516,7 @@ func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusD
 			})
 		}
 	}
+	report.Message = statusMessage(report)
 
 	if asJSON {
 		if err := writeJSON(w, report); err != nil {
@@ -494,7 +533,7 @@ func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusD
 		return errors.New("the database is marked dirty and needs manual repair")
 
 	case len(report.Pending) > 0:
-		return fmt.Errorf("%d migration(s) pending; run `sorovault migrate` to apply them", len(report.Pending))
+		return errors.New(report.Message)
 
 	default:
 		// Nothing is pending, whether the database is at the latest version
@@ -510,8 +549,8 @@ func writeMigrationStatus(w io.Writer, report migrateStatusReport) error {
 
 	switch {
 	case report.Dirty:
-		fmt.Fprintf(w, "\nthe database is marked dirty: a migration failed partway and the schema is in an unknown state\n")
-		fmt.Fprintf(w, "repair the schema by hand, then set the version with the golang-migrate CLI (`migrate -path migrations -database \"$DATABASE_URL\" force <version>`) before applying migrations again\n")
+		fmt.Fprintf(w, "\n%s\n", dirtyState)
+		fmt.Fprintf(w, "%s\n", dirtyAdvice)
 		return nil
 
 	case len(report.Pending) > 0:
@@ -524,12 +563,11 @@ func writeMigrationStatus(w io.Writer, report migrateStatusReport) error {
 		return tw.Flush()
 
 	case report.Current > report.Latest:
-		fmt.Fprintf(w, "\nthe database is at version %d, ahead of the migrations in this binary (version %d)\n",
-			report.Current, report.Latest)
+		fmt.Fprintf(w, "\n%s\n", report.Message)
 		return nil
 
 	default:
-		fmt.Fprintf(w, "\nthe database is up to date\n")
+		fmt.Fprintf(w, "\n%s\n", upToDate)
 		return nil
 	}
 }
@@ -852,9 +890,15 @@ func printFunction(w io.Writer, fn model.Function) {
 }
 
 // writeJSON emits an indented JSON document followed by a newline.
+//
+// HTML escaping is off: this JSON is read by other programs, not embedded
+// in a page, and escaping would turn a placeholder like <version> into
+// \u003cversion\u003e, which is harder to read in a terminal and no safer
+// once parsed.
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 

@@ -249,7 +249,9 @@ as distinct from **404**, which means it is not there at all.
 
 `?download=1` serves a contract's interface as a file rather than a document
 the browser renders — `<contract>.<short-hash>.abi.json` — which is what the
-browse page's download link uses.
+browse page's download link uses. The file holds the same document the plain
+`GET` returns: the interface, under `interface`, with the contract's metadata
+beside it.
 
 ## CLI
 
@@ -334,12 +336,15 @@ pending migrations:
   4        contract_source
 ```
 
-The versions come from golang-migrate, the same source `sorovault migrate`
-applies, so the two cannot disagree; the pending migrations are the ones
-embedded in the binary that the database has not reached. No migration is
-applied: a status run reports and stops there. It does read the database
-through golang-migrate, which creates the migrator's own version table if the
-database has not been migrated yet — nothing else is written.
+The version the database has applied, and whether it is dirty, come from
+golang-migrate — the same source `sorovault migrate` applies, so the two
+cannot disagree. The latest version, and the migrations still to come, are
+the ones embedded in this binary. No migration is applied: a status run
+reports and stops there. It does read the database through golang-migrate,
+which creates the migrator's own version table if the database has not been
+migrated yet — nothing else is written. A database role that may only read
+will therefore fail the command; `sorovault doctor` reads the same state
+without writing anything.
 
 The command exits non-zero when migrations are pending, so it can gate a
 deployment. A database marked **dirty** — a migration that failed partway, so
@@ -347,7 +352,8 @@ the schema is in an unknown state — is reported as such, with what to do
 about it, and also exits non-zero.
 
 `--json` emits the same report as JSON, for a gate that reads it rather than
-a person:
+a person. The `message` says what the report means and what to do about it,
+so a reader of the JSON is told what a reader of the text report is:
 
 ```console
 $ sorovault migrate status --json
@@ -358,7 +364,8 @@ $ sorovault migrate status --json
   "pending": [
     { "version": 3, "name": "wasm_specs" },
     { "version": 4, "name": "contract_source" }
-  ]
+  ],
+  "message": "2 migration(s) pending; run `sorovault migrate` to apply them"
 }
 ```
 
