@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"sort"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -151,33 +149,46 @@ type Migration struct {
 // EmbeddedMigrations lists the migrations embedded in the binary, oldest
 // first.
 //
-// The names are parsed with golang-migrate's own parser, so the file naming
-// convention stays in one place.
+// The list comes from golang-migrate's own source, so the file naming
+// convention and the ordering stay in one place, and a migrations directory
+// the migrator would refuse — a duplicate version, say — is refused here
+// too rather than quietly listed.
 func EmbeddedMigrations() ([]Migration, error) {
-	entries, err := fs.ReadDir(sorovault.Migrations, "migrations")
+	src, err := iofs.New(sorovault.Migrations, "migrations")
 	if err != nil {
+		return nil, fmt.Errorf("store: reading embedded migrations: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	version, err := src.First()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// An empty migrations directory is not an error; it is a
+			// binary with nothing to apply.
+			return nil, nil
+		}
 		return nil, fmt.Errorf("store: reading embedded migrations: %w", err)
 	}
 
 	var migrations []Migration
-	for _, entry := range entries {
-		parsed, err := source.DefaultParse(entry.Name())
+	for {
+		body, name, err := src.ReadUp(version)
 		if err != nil {
-			// Not a migration file; the directory may hold anything.
-			continue
+			return nil, fmt.Errorf("store: reading embedded migration %d: %w", version, err)
 		}
-		if parsed.Direction != source.Up {
-			continue
-		}
-		migrations = append(migrations, Migration{
-			Version: parsed.Version,
-			Name:    parsed.Identifier,
-		})
-	}
+		_ = body.Close()
 
-	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].Version < migrations[j].Version
-	})
+		migrations = append(migrations, Migration{Version: version, Name: name})
+
+		next, err := src.Next(version)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				break
+			}
+			return nil, fmt.Errorf("store: reading embedded migrations: %w", err)
+		}
+		version = next
+	}
 	return migrations, nil
 }
 
