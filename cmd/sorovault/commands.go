@@ -404,6 +404,14 @@ type migrateStatusReport struct {
 	Message string `json:"message"`
 }
 
+// migrationStatusItem is one migration in a status report.
+type migrationStatusItem struct {
+	// Version is the migration's version number.
+	Version uint `json:"version"`
+	// Name is the migration's name.
+	Name string `json:"name"`
+}
+
 // The wording of the report. The text form and the JSON form both come
 // from here, so they cannot describe the same state differently.
 const (
@@ -437,14 +445,6 @@ func statusMessage(report migrateStatusReport) string {
 	default:
 		return upToDate
 	}
-}
-
-// migrationStatusItem is one migration in a status report.
-type migrationStatusItem struct {
-	// Version is the migration's version number.
-	Version uint `json:"version"`
-	// Name is the migration's name.
-	Name string `json:"name"`
 }
 
 // newMigrateStatusCmd builds the "migrate status" command. Its dependencies
