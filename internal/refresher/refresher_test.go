@@ -48,7 +48,7 @@ func (c *clock) Advance(d time.Duration) {
 func contractID(t *testing.T, n int) string {
 	t.Helper()
 	var raw [32]byte
-	raw[0], raw[1] = byte(n), byte(n>>8)
+	raw[0], raw[1] = byte(n), byte(n>>8) //nolint:gosec // n is a small test counter
 	id, err := strkey.Encode(strkey.VersionByteContract, raw[:])
 	require.NoError(t, err)
 	return id

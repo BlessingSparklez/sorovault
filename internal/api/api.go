@@ -257,18 +257,21 @@ func (s *Server) getTypeScriptClient(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.URL.Query().Get("download") != "" {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+contractID+`.client.ts"`)
 	}
-	_, _ = w.Write([]byte(source))
+	_, _ = w.Write([]byte(source)) //nolint:gosec // generated TypeScript, served as text/plain with nosniff
 }
 
 // Middleware returns the stack the whole server runs behind: a request ID, a
 // panic guard, and a bound on how long any one request may take.
+//
+// There is deliberately no RealIP middleware: it trusts X-Forwarded-For from
+// any client, and nothing here needs the client address.
 func Middleware(log *slog.Logger) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		middleware.RequestID,
-		middleware.RealIP,
 		middleware.Recoverer,
 		requestLogger(log),
 	}
