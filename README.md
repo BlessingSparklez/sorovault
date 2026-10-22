@@ -124,6 +124,29 @@ $ curl -X POST localhost:8080/api/contracts \
 
 Open <http://localhost:8080> for the browse UI.
 
+To run a published image instead of building from source, set
+`SOROVAULT_IMAGE`; `make up` still builds locally because it passes `--build`:
+
+```console
+$ SOROVAULT_IMAGE=ghcr.io/soroworks/sorovault:1.2.3 docker compose up
+```
+
+### Verifying a release
+
+Each release publishes `checksums.txt`, an SPDX SBOM for every archive, and a
+build-provenance attestation. Verify the archive you downloaded and match it
+to the SBOM before running it:
+
+```console
+$ gh attestation verify sorovault_1.2.3_linux_amd64.tar.gz \
+    --repo soroworks/sorovault
+$ sha256sum -c checksums.txt --ignore-missing
+$ jq '.packages[] | {name, version}' sorovault_1.2.3_linux_amd64.tar.gz.sbom.json
+```
+
+Container images are published as `ghcr.io/soroworks/sorovault:<version>` and
+`:latest` for `linux/amd64` and `linux/arm64`.
+
 ### Kubernetes with Helm
 
 The chart at [`deploy/helm/sorovault`](deploy/helm/sorovault) deploys the API
@@ -718,7 +741,7 @@ was live at some point stays retrievable by its hash.
 ```console
 $ make test        # no database, no network needed
 $ make test-all    # also runs the store suite against a throwaway Postgres
-$ make lint
+$ make lint        # golangci-lint, pinned to the version CI uses
 $ make build
 $ make help        # everything else
 ```

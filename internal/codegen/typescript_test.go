@@ -43,10 +43,10 @@ func TestGoldenZKVote(t *testing.T) {
 
 	golden := filepath.Join("testdata", "zkvote.client.ts")
 	if *update {
-		require.NoError(t, os.WriteFile(golden, []byte(got), 0o644))
+		require.NoError(t, os.WriteFile(golden, []byte(got), 0o600))
 		t.Logf("wrote %s", golden)
 	}
-	want, err := os.ReadFile(golden)
+	want, err := os.ReadFile(golden) //nolint:gosec // test-owned golden path
 	require.NoError(t, err, "golden file missing; regenerate with -update")
 	assert.Equal(t, string(want), got, "generated client changed; if intended, rerun with -update")
 }
@@ -70,13 +70,13 @@ func TestGoldenPackage(t *testing.T) {
 	if *update {
 		for _, file := range files {
 			path := filepath.Join(dir, filepath.FromSlash(file.Path))
-			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-			require.NoError(t, os.WriteFile(path, file.Data, 0o644))
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+			require.NoError(t, os.WriteFile(path, file.Data, 0o600))
 		}
 	}
 
 	for _, file := range files {
-		want, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file.Path)))
+		want, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file.Path))) //nolint:gosec // paths come from the generator, not the caller
 		require.NoErrorf(t, err, "%s is missing; regenerate with -update", file.Path)
 		assert.Equal(t, string(want), string(file.Data),
 			"%s changed; if intended, rerun with -update", file.Path)

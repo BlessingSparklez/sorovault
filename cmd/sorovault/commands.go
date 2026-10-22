@@ -44,7 +44,7 @@ contract has been upgraded since it was last seen.`,
 					cancel()
 
 					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", contractID, err)
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", contractID, err)
 						failed++
 						continue
 					}
@@ -93,7 +93,7 @@ its hash is known to differ.`,
 					cancel()
 
 					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", contractID, err)
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", contractID, err)
 						failed++
 						continue
 					}
@@ -106,16 +106,16 @@ its hash is known to differ.`,
 					}
 
 					if result.Changed {
-						fmt.Fprintf(cmd.OutOrStdout(), "%s upgraded to %s\n",
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s upgraded to %s\n",
 							result.Contract.ContractID, result.Contract.CurrentWasmHash)
 						continue
 					}
 					if result.Missing {
-						fmt.Fprintf(cmd.OutOrStdout(), "%s missing from the network\n",
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s missing from the network\n",
 							result.Contract.ContractID)
 						continue
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s unchanged\n", result.Contract.ContractID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s unchanged\n", result.Contract.ContractID)
 				}
 
 				if failed > 0 {
@@ -166,18 +166,18 @@ func newListCmd() *cobra.Command {
 				}
 
 				if len(page.Contracts) == 0 {
-					fmt.Fprintln(cmd.ErrOrStderr(), "no contracts registered")
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no contracts registered")
 					return nil
 				}
 
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "CONTRACT ID\tNETWORK\tWASM HASH\tLAST REFRESHED\tMATCHES\tSTATUS")
+				_, _ = fmt.Fprintln(tw, "CONTRACT ID\tNETWORK\tWASM HASH\tLAST REFRESHED\tMATCHES\tSTATUS")
 				for _, c := range page.Contracts {
 					status := ""
 					if c.MissingSince != nil {
 						status = "missing"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 						c.ContractID, c.Network, truncate(c.CurrentWasmHash, 12),
 						c.LastRefreshed.UTC().Format("2006-01-02 15:04"),
 						strings.Join(c.Matches, ","), status)
@@ -186,7 +186,7 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 
-				fmt.Fprintf(cmd.ErrOrStderr(), "\n%d of %d contract(s)\n", len(page.Contracts), page.Total)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\n%d of %d contract(s)\n", len(page.Contracts), page.Total)
 				return nil
 			})
 		},
@@ -384,14 +384,14 @@ and a README, ready to publish or install from a tarball.`,
 					}
 					for _, file := range files {
 						path := filepath.Join(dir, filepath.FromSlash(file.Path))
-						if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 							return err
 						}
-						if err := os.WriteFile(path, file.Data, 0o644); err != nil {
+						if err := os.WriteFile(path, file.Data, 0o600); err != nil {
 							return err
 						}
 					}
-					fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s (%d files)\n", dir, len(files))
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s (%d files)\n", dir, len(files))
 					return nil
 				}
 
@@ -409,10 +409,10 @@ and a README, ready to publish or install from a tarball.`,
 					_, err = io.WriteString(cmd.OutOrStdout(), source)
 					return err
 				}
-				if err := os.WriteFile(output, []byte(source), 0o644); err != nil {
+				if err := os.WriteFile(output, []byte(source), 0o600); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", output)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", output)
 				return nil
 			})
 		},
@@ -461,7 +461,7 @@ func newMigrateCmd() *cobra.Command {
 				return fmt.Errorf("database is at version %d but marked dirty; a previous migration failed partway and needs manual repair", version)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "database is at migration version %d\n", version)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "database is at migration version %d\n", version)
 			return nil
 		},
 	}
@@ -691,7 +691,7 @@ func printDoctor(w io.Writer, report doctorReport) {
 		if !c.OK {
 			status, detail = "FAIL", c.Error
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", status, c.Name, detail)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", status, c.Name, detail)
 	}
 	_ = tw.Flush()
 }
@@ -708,54 +708,54 @@ func printRegisterResult(w io.Writer, r *registry.Result) {
 		verb = "upgraded"
 	}
 
-	fmt.Fprintf(w, "%s %s on %s\n", r.Contract.ContractID, verb, r.Contract.Network)
-	fmt.Fprintf(w, "  wasm hash  %s\n", r.Contract.CurrentWasmHash)
+	_, _ = fmt.Fprintf(w, "%s %s on %s\n", r.Contract.ContractID, verb, r.Contract.Network)
+	_, _ = fmt.Fprintf(w, "  wasm hash  %s\n", r.Contract.CurrentWasmHash)
 
 	if r.Interface != nil {
-		fmt.Fprintf(w, "  functions  %d\n", len(r.Interface.Functions))
+		_, _ = fmt.Fprintf(w, "  functions  %d\n", len(r.Interface.Functions))
 		if n := len(r.Interface.Types.Structs) + len(r.Interface.Types.Unions) +
 			len(r.Interface.Types.Enums) + len(r.Interface.Types.ErrorEnums); n > 0 {
-			fmt.Fprintf(w, "  types      %d\n", n)
+			_, _ = fmt.Fprintf(w, "  types      %d\n", n)
 		}
 		if n := len(r.Interface.Events); n > 0 {
-			fmt.Fprintf(w, "  events     %d\n", n)
+			_, _ = fmt.Fprintf(w, "  events     %d\n", n)
 		}
 	}
 }
 
 // printInterface writes a contract's interface as readable signatures.
 func printInterface(w io.Writer, s *store.Spec) {
-	fmt.Fprintf(w, "%s  (%s)\n", s.ContractID, s.Network)
-	fmt.Fprintf(w, "wasm %s\n\n", s.WasmHash)
+	_, _ = fmt.Fprintf(w, "%s  (%s)\n", s.ContractID, s.Network)
+	_, _ = fmt.Fprintf(w, "wasm %s\n\n", s.WasmHash)
 
 	if len(s.Interface.Functions) == 0 {
-		fmt.Fprintln(w, "no functions")
+		_, _ = fmt.Fprintln(w, "no functions")
 	}
 	for _, fn := range s.Interface.Functions {
-		fmt.Fprintf(w, "  %s\n", fn.Signature())
+		_, _ = fmt.Fprintf(w, "  %s\n", fn.Signature())
 	}
 
 	t := s.Interface.Types
 	if n := len(t.Structs) + len(t.Unions) + len(t.Enums) + len(t.ErrorEnums); n > 0 {
-		fmt.Fprintln(w, "\ntypes:")
+		_, _ = fmt.Fprintln(w, "\ntypes:")
 		for _, x := range t.Structs {
-			fmt.Fprintf(w, "  struct %s (%d fields)\n", x.Name, len(x.Fields))
+			_, _ = fmt.Fprintf(w, "  struct %s (%d fields)\n", x.Name, len(x.Fields))
 		}
 		for _, x := range t.Unions {
-			fmt.Fprintf(w, "  enum   %s (%d cases)\n", x.Name, len(x.Cases))
+			_, _ = fmt.Fprintf(w, "  enum   %s (%d cases)\n", x.Name, len(x.Cases))
 		}
 		for _, x := range t.Enums {
-			fmt.Fprintf(w, "  enum   %s (%d cases, u32)\n", x.Name, len(x.Cases))
+			_, _ = fmt.Fprintf(w, "  enum   %s (%d cases, u32)\n", x.Name, len(x.Cases))
 		}
 		for _, x := range t.ErrorEnums {
-			fmt.Fprintf(w, "  error  %s (%d cases)\n", x.Name, len(x.Cases))
+			_, _ = fmt.Fprintf(w, "  error  %s (%d cases)\n", x.Name, len(x.Cases))
 		}
 	}
 
 	if len(s.Interface.Events) > 0 {
-		fmt.Fprintln(w, "\nevents:")
+		_, _ = fmt.Fprintln(w, "\nevents:")
 		for _, e := range s.Interface.Events {
-			fmt.Fprintf(w, "  %s (%d params)\n", e.Name, len(e.Params))
+			_, _ = fmt.Fprintf(w, "  %s (%d params)\n", e.Name, len(e.Params))
 		}
 	}
 }
@@ -772,13 +772,13 @@ type versionsDocument struct {
 // printVersions writes one row per stored interface, newest first.
 func printVersions(w io.Writer, versions []store.SpecVersion) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "WASM HASH\tDECODED\tCURRENT")
+	_, _ = fmt.Fprintln(tw, "WASM HASH\tDECODED\tCURRENT")
 	for _, v := range versions {
 		current := ""
 		if v.Current {
 			current = "yes"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 			v.WasmHash, v.DecodedAt.UTC().Format("2006-01-02 15:04"), current)
 	}
 	_ = tw.Flush()
@@ -786,29 +786,29 @@ func printVersions(w io.Writer, versions []store.SpecVersion) {
 
 // printFunction writes one function's signature in detail.
 func printFunction(w io.Writer, fn model.Function) {
-	fmt.Fprintf(w, "%s\n", fn.Signature())
+	_, _ = fmt.Fprintf(w, "%s\n", fn.Signature())
 
 	if fn.Doc != "" {
 		for _, line := range strings.Split(strings.TrimRight(fn.Doc, "\n"), "\n") {
-			fmt.Fprintf(w, "  // %s\n", line)
+			_, _ = fmt.Fprintf(w, "  // %s\n", line)
 		}
 	}
 
 	if len(fn.Inputs) > 0 {
-		fmt.Fprintln(w, "\ninputs:")
+		_, _ = fmt.Fprintln(w, "\ninputs:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, in := range fn.Inputs {
-			fmt.Fprintf(tw, "  %s\t%s\n", in.Name, in.Type.Display)
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\n", in.Name, in.Type.Display)
 		}
 		_ = tw.Flush()
 	}
 
-	fmt.Fprint(w, "\nreturns: ")
+	_, _ = fmt.Fprint(w, "\nreturns: ")
 	if len(fn.Outputs) == 0 {
-		fmt.Fprintln(w, "()")
+		_, _ = fmt.Fprintln(w, "()")
 		return
 	}
-	fmt.Fprintln(w, fn.Outputs[0].Display)
+	_, _ = fmt.Fprintln(w, fn.Outputs[0].Display)
 }
 
 // writeJSON emits an indented JSON document followed by a newline.
