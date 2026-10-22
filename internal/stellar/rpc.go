@@ -12,6 +12,8 @@ import (
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
+
+	"github.com/soroworks/sorovault/internal/wasm"
 )
 
 // RPCFetcher reads contract code over the Stellar RPC JSON-RPC API.
@@ -71,6 +73,17 @@ func (f *RPCFetcher) FetchContract(ctx context.Context, contractID string) (*Con
 	}, nil
 }
 
+// FetchWasm returns uploaded code by its SHA-256 hash.
+func (f *RPCFetcher) FetchWasm(ctx context.Context, wasmHash string) ([]byte, error) {
+	hashBytes, err := hex.DecodeString(wasmHash)
+	if err != nil || len(hashBytes) != 32 {
+		return nil, fmt.Errorf("stellar: invalid wasm hash %q", wasmHash)
+	}
+	var hash xdr.Hash
+	copy(hash[:], hashBytes)
+	return f.codeByHash(ctx, hash)
+}
+
 // instanceWasmHash reads the contract's instance entry and returns the hash
 // of the WASM its executable points at.
 func (f *RPCFetcher) instanceWasmHash(ctx context.Context, contractID string) (xdr.Hash, error) {
@@ -109,7 +122,7 @@ func (f *RPCFetcher) instanceWasmHash(ctx context.Context, contractID string) (x
 		return zero, fmt.Errorf("%w: %s", ErrNoWasm, contractID)
 	}
 
-	return xdr.Hash(wasmHash), nil
+	return wasmHash, nil
 }
 
 // codeByHash reads the contract code entry stored under a WASM hash.
@@ -124,7 +137,7 @@ func (f *RPCFetcher) codeByHash(ctx context.Context, hash xdr.Hash) ([]byte, err
 		return nil, err
 	}
 	if entry == nil {
-		return nil, fmt.Errorf("stellar: no code entry for wasm hash %x (it may have expired)", hash)
+		return nil, fmt.Errorf("%w: no code entry for wasm hash %x (it may have expired)", ErrWasmNotFound, hash)
 	}
 
 	var data xdr.LedgerEntryData
@@ -135,7 +148,16 @@ func (f *RPCFetcher) codeByHash(ctx context.Context, hash xdr.Hash) ([]byte, err
 		return nil, fmt.Errorf("stellar: entry %x is not contract code", hash)
 	}
 
-	return data.ContractCode.Code, nil
+	// The network caps contract code well below this, but a misbehaving or
+	// hostile endpoint is not bound by that, so refuse the module before it
+	// reaches the decoder.
+	code := data.ContractCode.Code
+	if len(code) > wasm.MaxModuleSize {
+		return nil, fmt.Errorf("%w: code entry %x is %d bytes, limit is %d",
+			wasm.ErrModuleTooLarge, hash, len(code), wasm.MaxModuleSize)
+	}
+
+	return code, nil
 }
 
 // singleEntry requests one ledger key and returns the entry, or nil when the

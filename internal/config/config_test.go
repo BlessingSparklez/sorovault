@@ -13,7 +13,7 @@ import (
 	"github.com/soroworks/sorovault/internal/config"
 )
 
-const testDatabaseURL = "postgres://user:pass@localhost:5432/sorovault"
+const testDatabaseURL = "postgres://user:pass@localhost:5432/sorovault" //nolint:gosec // fixture, not a real credential
 
 // setEnv applies a set of variables for one test, clearing any others the
 // package reads so the ambient environment cannot influence the result.
@@ -23,6 +23,8 @@ func setEnv(t *testing.T, vars map[string]string) {
 	for _, key := range []string{
 		"RPC_URL", "NETWORK_PASSPHRASE", "DATABASE_URL", "DATABASE_URL_FILE",
 		"HTTP_ADDR", "LOG_LEVEL", "RPC_TIMEOUT", "REFRESH_INTERVAL",
+		"MAX_CONCURRENT_REGISTRATIONS", "REFRESH_WEBHOOK_URL",
+		"REFRESH_WEBHOOK_SECRET",
 	} {
 		if v, ok := vars[key]; ok {
 			t.Setenv(key, v)
@@ -45,6 +47,8 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, slog.LevelInfo, cfg.LogLevel)
 	assert.Equal(t, config.DefaultRPCTimeout, cfg.RPCTimeout)
 	assert.Zero(t, cfg.RefreshInterval, "automatic refresh is opt-in")
+	assert.Zero(t, cfg.MaxConcurrentRegistrations,
+		"the concurrency limit is left to the registry unless it is configured")
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -69,12 +73,126 @@ func TestLoadOverrides(t *testing.T) {
 	assert.Equal(t, 90*time.Second, cfg.RPCTimeout)
 }
 
+func TestMaxConcurrentRegistrations(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    int
+		wantErr string
+	}{
+		{
+			name: "unset leaves the registry's own default alone",
+		},
+		{
+			name:  "a limit",
+			value: "8",
+			want:  8,
+		},
+		{
+			name:  "the smallest limit",
+			value: "1",
+			want:  1,
+		},
+		{
+			name:  "the largest limit",
+			value: "1000",
+			want:  1000,
+		},
+		{
+			name:  "surrounding space is ignored",
+			value: " 12 ",
+			want:  12,
+		},
+		{
+			name:    "zero is not a limit",
+			value:   "0",
+			wantErr: "must be between",
+		},
+		{
+			name:    "a negative limit",
+			value:   "-1",
+			wantErr: "must be between",
+		},
+		{
+			name:    "above the largest limit",
+			value:   "1001",
+			wantErr: "must be between",
+		},
+		{
+			name:    "not a number",
+			value:   "lots",
+			wantErr: "MAX_CONCURRENT_REGISTRATIONS",
+		},
+		{
+			name:    "not a whole number",
+			value:   "2.5",
+			wantErr: "MAX_CONCURRENT_REGISTRATIONS",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vars := map[string]string{"DATABASE_URL": testDatabaseURL}
+			if tt.value != "" {
+				vars["MAX_CONCURRENT_REGISTRATIONS"] = tt.value
+			}
+			setEnv(t, vars)
+
+			cfg, err := config.Load()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.MaxConcurrentRegistrations)
+		})
+	}
+}
+
 func TestLoadRequiresDatabaseURL(t *testing.T) {
 	setEnv(t, nil)
 
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "DATABASE_URL")
+}
+
+func TestRefreshWebhook(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		setEnv(t, map[string]string{"DATABASE_URL": testDatabaseURL})
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.RefreshWebhookURL)
+		assert.Empty(t, cfg.RefreshWebhookSecret)
+	})
+
+	t.Run("set", func(t *testing.T) {
+		setEnv(t, map[string]string{
+			"DATABASE_URL":           testDatabaseURL,
+			"REFRESH_WEBHOOK_URL":    "https://hooks.example.test/sorovault",
+			"REFRESH_WEBHOOK_SECRET": "s3cret",
+		})
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "https://hooks.example.test/sorovault", cfg.RefreshWebhookURL)
+		assert.Equal(t, "s3cret", cfg.RefreshWebhookSecret)
+	})
+
+	t.Run("a URL that cannot be posted to is refused", func(t *testing.T) {
+		for _, url := range []string{"not a url", "/relative", "ftp://example.test/hook"} {
+			setEnv(t, map[string]string{
+				"DATABASE_URL":        testDatabaseURL,
+				"REFRESH_WEBHOOK_URL": url,
+			})
+
+			_, err := config.Load()
+			require.Error(t, err, "url %q", url)
+			assert.Contains(t, err.Error(), "REFRESH_WEBHOOK_URL")
+		}
+	})
 }
 
 func TestLogLevels(t *testing.T) {

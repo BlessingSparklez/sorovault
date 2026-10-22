@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +32,10 @@ type Config struct {
 	NetworkPassphrase string
 	// DatabaseURL is the Postgres connection string for the registry.
 	DatabaseURL string
+	// MaxConcurrentRegistrations is how many registrations and refreshes
+	// may run at once, across every client. Zero means unset, and the
+	// registry's own default applies.
+	MaxConcurrentRegistrations int
 	// HTTPAddr is the address the API and browse UI listen on.
 	HTTPAddr string
 	// LogLevel is one of debug, info, warn, error.
@@ -40,12 +46,30 @@ type Config struct {
 	// registered contract that has not been refreshed within it. Zero turns
 	// automatic refresh off.
 	RefreshInterval time.Duration
+	// RefreshWebhookURL, when set, is the endpoint a refresh sweep posts
+	// to whenever a contract's interface changes.
+	RefreshWebhookURL string
+	// RefreshWebhookSecret, when set, signs webhook payloads with
+	// HMAC-SHA256 so a receiver can tell them from anyone else's.
+	RefreshWebhookSecret string
 }
 
 // MinRefreshInterval is the shortest REFRESH_INTERVAL accepted. Below it a
 // sweep over a large registry could still be running when the next is due,
 // and a public RPC endpoint would see it as abuse.
 const MinRefreshInterval = time.Minute
+
+// Bounds on MAX_CONCURRENT_REGISTRATIONS, the number of registrations and
+// refreshes allowed to run at once.
+const (
+	// MinConcurrentRegistrationLimit is the smallest limit accepted: one
+	// registration at a time is a limit, none at all is not.
+	MinConcurrentRegistrationLimit = 1
+	// MaxConcurrentRegistrationLimit is the largest limit accepted. Every
+	// registration holds a WASM module in memory while it decodes, so a
+	// limit in the thousands would defeat the point of having one.
+	MaxConcurrentRegistrationLimit = 1000
+)
 
 // Load reads configuration from the process environment.
 //
@@ -94,6 +118,22 @@ func Load() (*Config, error) {
 		cfg.RefreshInterval = d
 	}
 
+	limit, err := envInt("MAX_CONCURRENT_REGISTRATIONS",
+		MinConcurrentRegistrationLimit, MaxConcurrentRegistrationLimit)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConcurrentRegistrations = limit
+
+	webhookURL := strings.TrimSpace(os.Getenv("REFRESH_WEBHOOK_URL"))
+	if webhookURL != "" {
+		if err := checkWebhookURL(webhookURL); err != nil {
+			return nil, err
+		}
+	}
+	cfg.RefreshWebhookURL = webhookURL
+	cfg.RefreshWebhookSecret = os.Getenv("REFRESH_WEBHOOK_SECRET")
+
 	if cfg.DatabaseURL == "" {
 		return nil, errors.New("config: DATABASE_URL or DATABASE_URL_FILE is required")
 	}
@@ -102,6 +142,20 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// checkWebhookURL rejects a webhook address that could never be delivered
+// to. Catching it here means the mistake is reported when the process
+// starts, rather than on the first contract that gets upgraded.
+func checkWebhookURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: REFRESH_WEBHOOK_URL %q: %w", raw, err)
+	}
+	if !parsed.IsAbs() || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("config: REFRESH_WEBHOOK_URL %q must be an absolute HTTP or HTTPS URL", raw)
+	}
+	return nil
 }
 
 // DatabaseURLFromEnv resolves the Postgres connection string.
@@ -127,7 +181,7 @@ func DatabaseURLFromEnv() (string, error) {
 
 	// The read error names the path; the contents are a credential, so they
 	// must not reach the error, a log line or a stack trace.
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path is an operator-provided secret file setting
 	if err != nil {
 		return "", fmt.Errorf("config: DATABASE_URL_FILE: %w", err)
 	}
@@ -147,6 +201,28 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envInt reads an integer from the environment.
+//
+// An unset or empty variable yields zero, which means "not configured". A
+// value that is not a whole number, or that falls outside the accepted
+// range, is an error: a limit of zero registrations would stop the registry
+// working, and one of thousands would not be a limit.
+func envInt(name string, min, max int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s %q: %w", name, raw, err)
+	}
+	if n < min || n > max {
+		return 0, fmt.Errorf("config: %s must be between %d and %d, got %d",
+			name, min, max, n)
+	}
+	return n, nil
 }
 
 func parseLevel(s string) (slog.Level, error) {

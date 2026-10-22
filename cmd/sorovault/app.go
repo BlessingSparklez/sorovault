@@ -43,6 +43,7 @@ func newApp(ctx context.Context) (*app, error) {
 	reg := registry.New(fetcher, spec.XDRDecoder{}, db, registry.Options{
 		ExpectPassphrase: cfg.NetworkPassphrase,
 		Logger:           log,
+		MaxConcurrent:    cfg.MaxConcurrentRegistrations,
 	})
 
 	return &app{
@@ -82,6 +83,24 @@ func withApp(ctx context.Context, fn func(context.Context, *app) error) error {
 // fetchContext bounds a single contract fetch by the configured timeout.
 func (a *app) fetchContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, a.cfg.RPCTimeout)
+}
+
+// withStore runs fn against the database alone. Commands that only move
+// registry data between stores use it so they cannot accidentally depend on
+// RPC: export and import must work during an outage.
+func withStore(ctx context.Context, fn func(context.Context, store.Store) error) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	db, err := store.NewPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+
+	return fn(ctx, db)
 }
 
 // requireDatabaseURL produces the same guidance as config.Load for commands
