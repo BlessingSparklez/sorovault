@@ -124,6 +124,29 @@ $ curl -X POST localhost:8080/api/contracts \
 
 Open <http://localhost:8080> for the browse UI.
 
+To run a published image instead of building from source, set
+`SOROVAULT_IMAGE`; `make up` still builds locally because it passes `--build`:
+
+```console
+$ SOROVAULT_IMAGE=ghcr.io/soroworks/sorovault:1.2.3 docker compose up
+```
+
+### Verifying a release
+
+Each release publishes `checksums.txt`, an SPDX SBOM for every archive, and a
+build-provenance attestation. Verify the archive you downloaded and match it
+to the SBOM before running it:
+
+```console
+$ gh attestation verify sorovault_1.2.3_linux_amd64.tar.gz \
+    --repo soroworks/sorovault
+$ sha256sum -c checksums.txt --ignore-missing
+$ jq '.packages[] | {name, version}' sorovault_1.2.3_linux_amd64.tar.gz.sbom.json
+```
+
+Container images are published as `ghcr.io/soroworks/sorovault:<version>` and
+`:latest` for `linux/amd64` and `linux/arm64`.
+
 ### Kubernetes with Helm
 
 The chart at [`deploy/helm/sorovault`](deploy/helm/sorovault) deploys the API
@@ -427,11 +450,15 @@ beside it.
 
 ```console
 sorovault add <contract_id>...      # fetch, decode and register
+sorovault remove <contract_id>      # delete a contract and its versions (--yes)
 sorovault refresh <contract_id>...  # re-check for an upgraded interface
+sorovault refresh --all             # one sweep over every contract (--json)
 sorovault list                      # -q, --function, --type, --network, --limit, --offset
 sorovault get <contract_id>         # --function, --wasm-hash, --json
 sorovault versions <contract_id>    # --network, --json
 sorovault codegen <contract_id>     # --lang ts|md; -o, --wasm-hash, --package
+sorovault export [file]             # versioned JSON backup (-o)
+sorovault import [file]             # restore a backup (--merge)
 sorovault serve                     # JSON API + browse UI
 sorovault migrate                   # apply schema migrations
 sorovault migrate status            # --json
@@ -549,6 +576,36 @@ $ sorovault migrate status --json
   "message": "2 migration(s) pending; run `sorovault migrate` to apply them"
 }
 ```
+### Shell completion
+
+`sorovault completion bash|zsh|fish|powershell` prints a completion script (this
+is Cobra's built-in command; run it once per shell). Then `Tab` completes the
+arguments that are otherwise awkward to type:
+
+```console
+$ sorovault get <Tab>
+CDZZXVGUCLBUTE3WDD6TF2NXPTBPOYTVPPBBIZMSPVIQLUG226XJ4PAN  zkvote
+CBQZ…
+
+$ sorovault get CDZZ --network <Tab>
+testnet  futurenet  mainnet
+```
+
+`get`, `versions`, `refresh` and `codegen` complete contract IDs from the
+registry, and `--network` completes the network names. Named contracts carry
+their name as a description, so the candidate is readable rather than a column
+of 56-character identifiers.
+
+Two rules shape the behaviour, because completion runs inside the user's shell
+prompt on every `Tab`:
+
+- **It never fails noisily.** A database that is down produces no candidates
+  and no error, rather than text pasted into the command line.
+- **It is bounded.** The lookup is capped at a fraction of a second and at 200
+  candidates, so a slow database or a large registry cannot hold the prompt.
+
+Completion reads the registry only; it never contacts the network. `refresh`
+takes contract IDs or `--all`, so it offers no IDs once `--all` is set.
 
 ## Typed clients
 
@@ -776,7 +833,7 @@ was live at some point stays retrievable by its hash.
 ```console
 $ make test        # no database, no network needed
 $ make test-all    # also runs the store suite against a throwaway Postgres
-$ make lint
+$ make lint        # golangci-lint, pinned to the version CI uses
 $ make build
 $ make help        # everything else
 ```
