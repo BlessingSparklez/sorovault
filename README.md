@@ -191,10 +191,15 @@ All configuration is environment variables. Only `DATABASE_URL` (or the path in 
 | `NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | the network you expect `RPC_URL` to serve |
 | `HTTP_ADDR` | `:8080` | listen address |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | `text` | `text` for people, `json` for one parseable object per line |
 | `RPC_TIMEOUT` | `30s` | bound on a single contract fetch |
 | `REFRESH_INTERVAL` | `0` (off) | re-check registered contracts this often while serving; minimum `1m` |
 | `REFRESH_WEBHOOK_URL` | — | post a JSON message here whenever a refresh finds an upgraded contract |
 | `REFRESH_WEBHOOK_SECRET` | — | sign webhook payloads with HMAC-SHA256 |
+| `RATE_LIMIT_PER_MINUTE` | `30` | registrations and refreshes allowed per client per minute |
+| `RATE_LIMIT_BURST` | `10` | how many of those may arrive at once |
+| `TRUST_X_FORWARDED_FOR` | `false` | use the first `X-Forwarded-For` address as the client; only behind a trusted proxy |
+| `CORS_ORIGINS` | — | comma-separated exact browser origins, or `*` for read-only routes only |
 
 `NETWORK_PASSPHRASE` is a guard, not a source of truth. SoroVault reads the real
 passphrase from the RPC endpoint and refuses to proceed if the two disagree, so
@@ -324,6 +329,7 @@ the same **503**, with the `Retry-After` header, inline on the page.
 | `GET` | `/api/upgrades` | recent interface upgrades, newest first — `?network=`, `?limit=`, `?offset=` |
 | `GET` | `/api/upgrades.atom` | the same upgrades as an Atom 1.0 feed |
 | `GET` | `/healthz` | liveness |
+| `GET` | `/readyz` | readiness: checks Postgres and RPC |
 
 `POST /api/contracts` returns **201** when the contract is new and **200** when
 it was already registered, so it is safe to retry. Passing `?wasm_hash=` to a

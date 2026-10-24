@@ -37,9 +37,10 @@ import (
 
 // Server holds the API's dependencies.
 type Server struct {
-	reg   *registry.Registry
-	log   *slog.Logger
-	cache *interfaceCache
+	reg       *registry.Registry
+	log       *slog.Logger
+	cache     *interfaceCache
+	rateLimit *clientLimiter
 
 	// lastSweep, when set, reports the most recent automatic refresh
 	// sweep. It is nil when refresh is disabled, and GET /api/stats then
@@ -68,14 +69,14 @@ func (s *Server) Routes() chi.Router {
 	r.Use(compressResponses("application/json", "text/plain"))
 
 	r.Get("/contracts", s.listContracts)
-	r.Post("/contracts", s.registerContract)
+	r.Post("/contracts", s.rateLimited(s.registerContract))
 	r.Post("/contracts:batch", s.batchRegisterContracts)
 	r.Get("/wasm/{hash}", s.getWasmSpec)
 	r.Post("/wasm/{hash}", s.catalogWasm)
 	r.Get("/wasm/{hash}/contracts", s.listWasmContracts)
 	r.Get("/contracts/{id}", s.getContract)
 	r.Put("/contracts/{id}/source", s.updateContractSource)
-	r.Post("/contracts/{id}/refresh", s.refreshContract)
+	r.Post("/contracts/{id}/refresh", s.rateLimited(s.refreshContract))
 	r.Get("/contracts/{id}/versions", s.listVersions)
 	r.Get("/contracts/{id}/functions", s.listFunctions)
 	r.Get("/contracts/{id}/events", s.listEvents)
