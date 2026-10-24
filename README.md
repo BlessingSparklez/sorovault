@@ -124,6 +124,29 @@ $ curl -X POST localhost:8080/api/contracts \
 
 Open <http://localhost:8080> for the browse UI.
 
+To run a published image instead of building from source, set
+`SOROVAULT_IMAGE`; `make up` still builds locally because it passes `--build`:
+
+```console
+$ SOROVAULT_IMAGE=ghcr.io/soroworks/sorovault:1.2.3 docker compose up
+```
+
+### Verifying a release
+
+Each release publishes `checksums.txt`, an SPDX SBOM for every archive, and a
+build-provenance attestation. Verify the archive you downloaded and match it
+to the SBOM before running it:
+
+```console
+$ gh attestation verify sorovault_1.2.3_linux_amd64.tar.gz \
+    --repo soroworks/sorovault
+$ sha256sum -c checksums.txt --ignore-missing
+$ jq '.packages[] | {name, version}' sorovault_1.2.3_linux_amd64.tar.gz.sbom.json
+```
+
+Container images are published as `ghcr.io/soroworks/sorovault:<version>` and
+`:latest` for `linux/amd64` and `linux/arm64`.
+
 ### Kubernetes with Helm
 
 The chart at [`deploy/helm/sorovault`](deploy/helm/sorovault) deploys the API
@@ -296,6 +319,8 @@ the same **503**, with the `Retry-After` header, inline on the page.
 | `GET` | `/api/contracts/{id}` | the decoded ABI — `?network=`, `?wasm_hash=` |
 | `PUT` | `/api/contracts/{id}/source` | attach a `source_url` and optional `source_commit` |
 | `GET` | `/api/contracts/{id}/functions/{fn}` | one function in detail |
+| `GET` | `/api/contracts/{id}/functions/{fn}/example.json` | one example argument list for the function — `?wasm_hash=` |
+| `GET` | `/api/contracts/{id}/events` | the contract's event definitions — `?network=`, `?wasm_hash=` |
 | `GET` | `/api/contracts/{id}/client.ts` | typed TypeScript client — `?wasm_hash=`, `?download=1` |
 | `GET` | `/api/openapi.json` | OpenAPI 3.1 description of this API |
 | `GET` | `/api/contracts/{id}/versions` | every stored interface version |
@@ -310,39 +335,18 @@ the same **503**, with the `Retry-After` header, inline on the page.
 it was already registered, so it is safe to retry. Passing `?wasm_hash=` to a
 read selects a superseded version instead of the current one.
 
-**Liveness and readiness.** `GET /healthz` only says the process is serving; it
-deliberately ignores Postgres and RPC so a scheduler does not restart SoroVault
-over a dependency blip. `GET /readyz` is the opposite check: it answers **200**
-only when the database responds and the RPC endpoint serves the configured
-network, and **503** with a body naming each failing dependency otherwise. Its
-answer is cached for five seconds, so a frequent probe does not itself load the
-dependencies:
+`GET /api/contracts/{id}/functions/{fn}/example.json` returns an example
+argument list for a call: one deterministic placeholder of each argument's
+type, keyed as the function's JSON Schema spells them, so it validates against
+that schema and can be pasted into a client and edited:
 
-```json
-{
-  "status": "unavailable",
-  "version": "dev",
-  "checks": { "database": "connection refused", "rpc": "ok" }
-}
+```console
+$ curl -s localhost:8080/api/contracts/CDZZ…4PAN/functions/has_voted/example.json
+{"nullifier":"0000000000000000000000000000000000000000000000000000000000000000"}
 ```
 
-**Rate limiting.** Registering or refreshing a contract makes RPC calls and can
-download a WASM module, so `POST /api/contracts` and
-`POST /api/contracts/{id}/refresh` are limited per client. The defaults are 30
-requests per minute with a burst of 10; `RATE_LIMIT_PER_MINUTE` and
-`RATE_LIMIT_BURST` change them. A client over the limit gets **429** with a
-`Retry-After` header and a JSON error body. Reads and the browse UI are not
-limited. The client is the connection address unless `TRUST_X_FORWARDED_FOR` is
-enabled; only enable it when a proxy you control sets that header, or callers
-can invent a new address on every request.
-
-**CORS.** Cross-origin browser clients are opt-in through `CORS_ORIGINS`: an
-exact, comma-separated list such as `https://app.example.com,http://localhost:3000`.
-Unset means no CORS headers, exactly as before. `*` is also accepted, but it
-opens only `GET`/`HEAD` (and their preflights): the registry's read responses
-are public, while the write routes spend this instance's RPC quota and database
-writes, so they are never opened to every origin. An explicit allowlist may use
-the write methods because the operator has named the clients they trust.
+`sorovault codegen --lang examples` writes the same examples for every function
+at once, one entry per function name.
 
 **Batches.** `POST /api/contracts:batch` registers up to 20 contracts in one
 request, which is how a tool seeds a whole deployment without making twenty
@@ -460,11 +464,15 @@ it. The contract page links its WASM hash to this listing.
 
 ```console
 sorovault add <contract_id>...      # fetch, decode and register
+sorovault remove <contract_id>      # delete a contract and its versions (--yes)
 sorovault refresh <contract_id>...  # re-check for an upgraded interface
+sorovault refresh --all             # one sweep over every contract (--json)
 sorovault list                      # -q, --function, --type, --network, --limit, --offset
 sorovault get <contract_id>         # --function, --wasm-hash, --json
 sorovault versions <contract_id>    # --network, --json
-sorovault codegen <contract_id>     # --lang ts|md; -o, --wasm-hash, --package
+sorovault codegen <contract_id>     # --lang ts|md|examples; -o, --wasm-hash, --package
+sorovault export [file]             # versioned JSON backup (-o)
+sorovault import [file]             # restore a backup (--merge)
 sorovault serve                     # JSON API + browse UI
 sorovault migrate                   # apply schema migrations
 sorovault doctor                    # check a deployment's health
@@ -531,6 +539,37 @@ never writes to the database, applies a migration, or changes anything on
 the network. It reads the same configuration as everything else, so a
 deployment missing its `DATABASE_URL` is reported as a configuration error
 rather than a passing check.
+
+### Shell completion
+
+`sorovault completion bash|zsh|fish|powershell` prints a completion script (this
+is Cobra's built-in command; run it once per shell). Then `Tab` completes the
+arguments that are otherwise awkward to type:
+
+```console
+$ sorovault get <Tab>
+CDZZXVGUCLBUTE3WDD6TF2NXPTBPOYTVPPBBIZMSPVIQLUG226XJ4PAN  zkvote
+CBQZ…
+
+$ sorovault get CDZZ --network <Tab>
+testnet  futurenet  mainnet
+```
+
+`get`, `versions`, `refresh` and `codegen` complete contract IDs from the
+registry, and `--network` completes the network names. Named contracts carry
+their name as a description, so the candidate is readable rather than a column
+of 56-character identifiers.
+
+Two rules shape the behaviour, because completion runs inside the user's shell
+prompt on every `Tab`:
+
+- **It never fails noisily.** A database that is down produces no candidates
+  and no error, rather than text pasted into the command line.
+- **It is bounded.** The lookup is capped at a fraction of a second and at 200
+  candidates, so a slow database or a large registry cannot hold the prompt.
+
+Completion reads the registry only; it never contacts the network. `refresh`
+takes contract IDs or `--all`, so it offers no IDs once `--all` is set.
 
 ## Typed clients
 
@@ -758,7 +797,7 @@ was live at some point stays retrievable by its hash.
 ```console
 $ make test        # no database, no network needed
 $ make test-all    # also runs the store suite against a throwaway Postgres
-$ make lint
+$ make lint        # golangci-lint, pinned to the version CI uses
 $ make build
 $ make help        # everything else
 ```
