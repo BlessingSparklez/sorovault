@@ -388,9 +388,22 @@ func copyHeader(dst, src http.Header) {
 func Middleware(log *slog.Logger) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		middleware.RequestID,
+		requestIDHeader,
 		middleware.Recoverer,
 		requestLogger(log),
 	}
+}
+
+// requestIDHeader copies the request ID onto the response, so a client can
+// quote it when reporting a problem. The ID itself is assigned by
+// middleware.RequestID.
+func requestIDHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := middleware.GetReqID(r.Context()); id != "" {
+			w.Header().Set(middleware.RequestIDHeader, id)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // getStats serves GET /api/stats.
