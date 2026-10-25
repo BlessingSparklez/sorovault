@@ -345,6 +345,9 @@ the same **503**, with the `Retry-After` header, inline on the page.
 | `GET` | `/healthz` | liveness |
 | `GET` | `/readyz` | readiness: checks Postgres and RPC |
 
+Worked examples for each route, with requests and abbreviated responses, are in
+[docs/api-recipes.md](docs/api-recipes.md).
+
 `POST /api/contracts` returns **201** when the contract is new and **200** when
 it was already registered, so it is safe to retry. Passing `?wasm_hash=` to a
 read selects a superseded version instead of the current one.
