@@ -923,30 +923,30 @@ func reportMigrationStatus(ctx context.Context, w io.Writer, deps migrateStatusD
 
 // writeMigrationStatus writes the human-readable report.
 func writeMigrationStatus(w io.Writer, report migrateStatusReport) error {
-	fmt.Fprintf(w, "current version: %d\n", report.Current)
-	fmt.Fprintf(w, "latest version:  %d\n", report.Latest)
+	_, _ = fmt.Fprintf(w, "current version: %d\n", report.Current)
+	_, _ = fmt.Fprintf(w, "latest version:  %d\n", report.Latest)
 
 	switch {
 	case report.Dirty:
-		fmt.Fprintf(w, "\n%s\n", dirtyState)
-		fmt.Fprintf(w, "%s\n", dirtyAdvice)
+		_, _ = fmt.Fprintf(w, "\n%s\n", dirtyState)
+		_, _ = fmt.Fprintf(w, "%s\n", dirtyAdvice)
 		return nil
 
 	case len(report.Pending) > 0:
-		fmt.Fprintf(w, "\npending migrations:\n")
+		_, _ = fmt.Fprintf(w, "\npending migrations:\n")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  VERSION\tNAME")
+		_, _ = fmt.Fprintln(tw, "  VERSION\tNAME")
 		for _, m := range report.Pending {
-			fmt.Fprintf(tw, "  %d\t%s\n", m.Version, m.Name)
+			_, _ = fmt.Fprintf(tw, "  %d\t%s\n", m.Version, m.Name)
 		}
 		return tw.Flush()
 
 	case report.Current > report.Latest:
-		fmt.Fprintf(w, "\n%s\n", report.Message)
+		_, _ = fmt.Fprintf(w, "\n%s\n", report.Message)
 		return nil
 
 	default:
-		fmt.Fprintf(w, "\n%s\n", upToDate)
+		_, _ = fmt.Fprintf(w, "\n%s\n", upToDate)
 		return nil
 	}
 }
