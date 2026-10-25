@@ -39,7 +39,7 @@ func newRateLimitedHarness(t *testing.T, opts api.RateLimitOptions) *harness {
 	return &harness{server: srv, fake: fake, store: db, api: server}
 }
 
-func postWithForwardedFor(t *testing.T, h *harness, path, body, forwardedFor string) (*http.Response, []byte) {
+func postWithForwardedFor(t *testing.T, h *harness, path, body, forwardedFor string) (statusResult, []byte) {
 	t.Helper()
 
 	req, err := http.NewRequest(http.MethodPost, h.server.URL+path, strings.NewReader(body))
@@ -53,11 +53,17 @@ func postWithForwardedFor(t *testing.T, h *harness, path, body, forwardedFor str
 
 	resp, err := h.server.Client().Do(req)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
-
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	return resp, raw
+	require.NoError(t, resp.Body.Close())
+	return statusResult{StatusCode: resp.StatusCode, Header: resp.Header}, raw
+}
+
+// statusResult is the part of a response these tests assert on. The helper
+// closes the body before returning, so no caller holds an open response.
+type statusResult struct {
+	StatusCode int
+	Header     http.Header
 }
 
 // TestRateLimitTriggersAndResets proves the registration route refuses the
