@@ -676,10 +676,19 @@ func (s *Server) getContract(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+ABIFilename(contractID, cacheHash)+`"`)
 	}
 
+	builtin := cacheHash == stellar.BuiltinSACIdentifier
+	responseHash := cacheHash
+	interfaceID := ""
+	if builtin {
+		responseHash = ""
+		interfaceID = stellar.BuiltinSACIdentifier
+	}
 	writeJSON(w, http.StatusOK, contractResponse{
 		ContractID:   contract.ContractID,
 		Network:      contract.Network,
-		WasmHash:     cacheHash,
+		WasmHash:     responseHash,
+		InterfaceID:  interfaceID,
+		Builtin:      builtin,
 		Name:         contract.Name,
 		Implements:   contract.Implements,
 		SourceURL:    contract.SourceURL,
@@ -737,12 +746,19 @@ func (s *Server) getFunction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wasmHash, interfaceID := stored.WasmHash, ""
+	if stored.Interface.Builtin {
+		wasmHash = ""
+		interfaceID = stored.WasmHash
+	}
 	writeJSON(w, http.StatusOK, functionResponse{
-		ContractID: stored.ContractID,
-		Network:    stored.Network,
-		WasmHash:   stored.WasmHash,
-		Signature:  fn.Signature(),
-		Function:   fn,
+		ContractID:  stored.ContractID,
+		Network:     stored.Network,
+		WasmHash:    wasmHash,
+		InterfaceID: interfaceID,
+		Builtin:     stored.Interface.Builtin,
+		Signature:   fn.Signature(),
+		Function:    fn,
 	})
 }
 
@@ -863,11 +879,18 @@ func (s *Server) listFunctions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	wasmHash, interfaceID := stored.WasmHash, ""
+	if stored.Interface.Builtin {
+		wasmHash = ""
+		interfaceID = stored.WasmHash
+	}
 	writeJSON(w, http.StatusOK, functionListResponse{
-		ContractID: stored.ContractID,
-		Network:    stored.Network,
-		WasmHash:   stored.WasmHash,
-		Functions:  functions,
+		ContractID:  stored.ContractID,
+		Network:     stored.Network,
+		WasmHash:    wasmHash,
+		InterfaceID: interfaceID,
+		Builtin:     stored.Interface.Builtin,
+		Functions:   functions,
 	})
 }
 
