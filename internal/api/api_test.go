@@ -52,12 +52,16 @@ func newHarnessWith(t *testing.T, opts registry.Options) *harness {
 	return newHarnessWithOptions(t, stellartest.New(), store.NewMemory(), opts)
 }
 
+// newHarnessWithStore is newHarness with a store of the caller's choosing,
+// so a test can watch what the API does with one.
 func newHarnessWithStore(t *testing.T, fake *stellartest.Fake, db store.Store) *harness {
 	t.Helper()
 
 	return newHarnessWithOptions(t, fake, db, registry.Options{})
 }
 
+// newHarnessWithOptions builds a harness over the given network, store and
+// registry options.
 func newHarnessWithOptions(t *testing.T, fake *stellartest.Fake, db store.Store, opts registry.Options) *harness {
 	t.Helper()
 
