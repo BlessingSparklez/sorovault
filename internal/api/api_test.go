@@ -1051,6 +1051,14 @@ func TestTypeScriptClient(t *testing.T) {
 	resp, _ = h.do(t, http.MethodGet, "/api/contracts/"+idA+"/client.ts?download=1", "")
 	assert.Equal(t, `attachment; filename="`+idA+`.client.ts"`, resp.Header.Get("Content-Disposition"))
 
+	resp, raw = h.do(t, http.MethodGet, "/api/contracts/"+idA+"/client.ts?zod=1", "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	zod := string(raw)
+	assert.Contains(t, zod, `import { z } from "zod";`)
+	assert.Contains(t, zod, "export const scoreArgsSchema = z.object({", "the schemas track the live interface")
+	assert.NotContains(t, zod, "ProposalSchema", "schemas follow what the interface holds now")
+	assert.NotContains(t, body, `import { z } from "zod";`, "the plain flavour stays zod-free")
+
 	resp, _ = h.do(t, http.MethodGet, "/api/contracts/"+idB+"/client.ts", "")
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

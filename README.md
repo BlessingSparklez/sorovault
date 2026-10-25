@@ -550,6 +550,7 @@ sorovault refresh --all             # one sweep over every contract (--json)
 sorovault list                      # -q, --function, --type, --network, --limit, --offset
 sorovault get <contract_id>         # --function, --wasm-hash, --json
 sorovault versions <contract_id>    # --network, --json
+sorovault codegen <contract_id>     # --lang ts|md|examples; -o, --wasm-hash, --package, --zod
 sorovault codegen <contract_id>     # --lang ts|md|examples; -o, --wasm-hash, --package
 sorovault check-client <client.ts>  # --contract, --api, --network; exits non-zero when stale
 sorovault export [file]             # versioned JSON backup (-o)
@@ -733,6 +734,29 @@ Type mappings follow the Stellar CLI's own bindings (`u64`→`bigint`,
 the SDK unchanged. It requires `@stellar/stellar-sdk` 14 or later and
 `buffer`.
 
+### Runtime validation
+
+TypeScript types disappear at compile time, but a frontend taking user input
+before building a transaction can validate against the same shapes at
+runtime with `--zod` (or `client.ts?zod=1` over the API). The generated file
+gains a schemas section — one Zod schema per struct, union and enum, plus
+one per function's argument list — with the widths enforced exactly:
+integer bounds at each kind's limits and exact byte lengths for
+`BytesN<N>`:
+
+```ts
+import { voteArgsSchema } from "./zkvote";
+
+const args = voteArgsSchema.parse(JSON.parse(input)); // throws before anything ships
+const tx = await client.vote(args);
+```
+
+A schema for a user-defined type references the others through `z.lazy`, so
+recursive interfaces stay legal, and the section compiles standalone: with
+`--zod` the file imports `zod` itself, and a package generated with
+`--package --zod` pins `zod` as a peer dependency at the same version CI
+type-checks the golden validators against.
+
 ### Staleness checks
 
 Every generated file embeds the interface version it was built from: the
@@ -756,6 +780,7 @@ if (!assertSameWasm(meta.wasm_hash)) {
 Checking is opt-in: nothing happens unless the application calls it, so
 offline use stays untouched, and a project that commits its client keeps it
 byte-identical until the interface actually changes.
+
 ### Checking a committed client for staleness
 
 Generated clients embed the WASM hash they were built for as the `wasmHash`
