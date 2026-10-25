@@ -114,7 +114,7 @@ func TestMiddlewareIgnoresXForwardedFor(t *testing.T) {
 
 	srv := newMiddlewareServer(t, func(r chi.Router) {
 		r.Get("/remote-addr", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, r.RemoteAddr)
+			_, _ = io.WriteString(w, r.RemoteAddr) //nolint:gosec // a test handler echoing the address back as text/plain
 		})
 	})
 
